@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    /* Language and Environment */
+    "target": "es2016",
+    
+    /* Modules */
+    "module": "commonjs",                  /* Quan trọng: Chuyển đổi import thành require */
+    "moduleResolution": "node",
+    "verbatimModuleSyntax": false,         /* Quan trọng: Tắt tính năng này để cho phép chuyển đổi */
+    "esModuleInterop": true,               /* Cho phép import các thư viện CommonJS dễ dàng */
+    "forceConsistentCasingInFileNames": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "outDir": "./dist",
+    "rootDir": "./src"
+  }
+}
