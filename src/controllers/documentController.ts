@@ -150,10 +150,143 @@ export const shareDocument = async (req: AuthRequest, res: Response): Promise<vo
   }
 };
 
+// --- 1.1. HÀM CHIA SẺ TÀI LIỆU CÔNG KHAI (KHÔNG CẦN ĐĂNG NHẬP) ---
+export const shareDocumentPublic = async (req: any, res: Response): Promise<void> => {
+  const { 
+    category, 
+    linkContent, 
+    textContent, 
+    expiration, 
+    password, 
+    isAnonymous,
+    latitude,
+    longitude 
+  } = req.body;
+
+  const file = req.file;
+
+  // ✅ Validate vị trí bắt buộc
+  if (!latitude || !longitude) {
+    res.status(400).json({ message: 'Location is required to share files.' });
+    return;
+  }
+
+  try {
+    let fileUrl = '';
+    let fileName = '';
+    let fileType = category;
+    let fileSize = 0;
+
+    // --- XỬ LÝ NỘI DUNG THEO LOẠI ---
+    if (category === 'Photos' || category === 'Videos' || category === 'Files') {
+      if (!file) {
+        res.status(400).json({ message: 'No file uploaded' });
+        return;
+      }
+
+      fileName = file.originalname;
+      fileSize = file.size;
+      const fileExt = fileName.split('.').pop()?.toLowerCase() || 'bin';
+      const filePath = `public/${Date.now()}.${fileExt}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('documents')
+        .upload(filePath, file.buffer, {
+          contentType: file.mimetype,
+          upsert: false
+        });
+
+      if (uploadError) throw uploadError;
+      fileUrl = filePath;
+    } 
+    else if (category === 'Links') {
+      if (!linkContent?.trim()) {
+        res.status(400).json({ message: 'Link content is required' });
+        return;
+      }
+      fileUrl = linkContent.trim();
+      fileName = linkContent.trim();
+    } 
+    else if (category === 'Text') {
+      if (!textContent?.trim()) {
+        res.status(400).json({ message: 'Text content is required' });
+        return;
+      }
+      fileName = `note-${Date.now()}.txt`;
+      const buffer = Buffer.from(textContent.trim(), 'utf-8');
+      const filePath = `public/${fileName}`;
+      
+      const { error } = await supabase.storage.from('documents').upload(filePath, buffer, { contentType: 'text/plain' });
+      if (error) throw error;
+      fileUrl = filePath;
+    }
+    else {
+      res.status(400).json({ message: 'Invalid category' });
+      return;
+    }
+
+    // --- XỬ LÝ MẬT KHẨU ---
+    let passwordHash = null;
+    let isProtected = false;
+    if (password && password.trim() !== '') {
+      const salt = await bcrypt.genSalt(10);
+      passwordHash = await bcrypt.hash(password.trim(), salt);
+      isProtected = true;
+    }
+
+    // --- TÍNH THỜI GIAN HẾT HẠN ---
+    const expiresAt = calculateExpiration(expiration);
+
+    // --- CHUẨN HÓA GIÁ TRỊ BOOLEAN ---
+    const isAnonymousBool = isAnonymous === 'true' || isAnonymous === true;
+
+    // --- CHUYỂN ĐỔI TỌA ĐỘ THÀNH POSTGIS POINT ---
+    const latNum = parseFloat(latitude as string);
+    const longNum = parseFloat(longitude as string);
+    
+    if (isNaN(latNum) || isNaN(longNum)) {
+      res.status(400).json({ message: 'Invalid latitude or longitude' });
+      return;
+    }
+
+    const locationPoint = `POINT(${longNum} ${latNum})`; // PostGIS: POINT(long lat)
+
+    // --- LƯU VÀO DATABASE ---
+    const { data: newDoc, error: dbError } = await supabase
+      .from('documents')
+      .insert([{
+        owner_id: null, // Public sharing - no owner
+        name: fileName,
+        file_url: fileUrl,
+        file_type: category,
+        file_size: fileSize,
+        is_protected: isProtected,
+        password_hash: passwordHash,
+        is_anonymous: true, // Always anonymous for public sharing
+        expires_at: expiresAt,
+        status: 'active',
+        location: locationPoint
+      }])
+      .select()
+      .single();
+
+    if (dbError) throw dbError;
+
+    res.status(201).json({ 
+      message: 'Shared successfully', 
+      document: newDoc 
+    });
+
+  } catch (error: any) {
+    console.error('Public Share Error:', error.message);
+    res.status(500).json({ message: 'Upload failed', error: error.message });
+  }
+};
+
 // --- 2. HÀM QUÉT TÀI LIỆU GẦN ĐÂY ---
 export const scanNearbyDocuments = async (req: AuthRequest, res: Response): Promise<void> => {
   const { latitude, longitude, radius } = req.query;
-  const myId = req.user.id;
+  const myId = req.user?.id; // Optional chaining for anonymous users
 
   if (!latitude || !longitude) {
     res.status(400).json({ message: 'Location required to scan.' });
@@ -180,8 +313,8 @@ export const scanNearbyDocuments = async (req: AuthRequest, res: Response): Prom
 
     if (error) throw error;
 
-    // Loại bỏ tài liệu do chính người dùng tạo (nếu không muốn thấy của mình)
-    const filteredDocs = documents.filter((doc: any) => doc.owner_id !== myId);
+    // Loại bỏ tài liệu do chính người dùng tạo (chỉ khi có user ID)
+    const filteredDocs = myId ? documents.filter((doc: any) => doc.owner_id !== myId) : documents;
 
     res.json({ documents: filteredDocs });
 
