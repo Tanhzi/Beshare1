@@ -1,7 +1,23 @@
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import { AuthRequest } from '../middleware/authMiddleware';
 import supabase from '../config/db';
 import bcrypt from 'bcryptjs';
+
+// Hằng số validation cho shareDocumentPublic
+const VALID_CATEGORIES = ['Photos', 'Videos', 'Files', 'Links', 'Text'] as const;
+const VALID_EXPIRATIONS = ['1 hour', '6 hours', '1 day', '3 days', '7 days'] as const;
+const MAX_TEXT_LENGTH = 100_000; // ký tự
+const MIN_PASSWORD_LENGTH = 4;
+const MAX_PASSWORD_LENGTH = 128;
+
+const isValidHttpUrl = (value: string): boolean => {
+  try {
+    const u = new URL(value);
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch {
+    return false;
+  }
+};
 
 // Hàm hỗ trợ tính thời gian hết hạn
 const calculateExpiration = (option: string): string | null => {
@@ -151,36 +167,100 @@ export const shareDocument = async (req: AuthRequest, res: Response): Promise<vo
 };
 
 // --- 1.1. HÀM CHIA SẺ TÀI LIỆU CÔNG KHAI (KHÔNG CẦN ĐĂNG NHẬP) ---
-export const shareDocumentPublic = async (req: any, res: Response): Promise<void> => {
-  const { 
-    category, 
-    linkContent, 
-    textContent, 
-    expiration, 
-    password, 
-    isAnonymous,
+export const shareDocumentPublic = async (req: Request, res: Response): Promise<void> => {
+  // --- Đảm bảo body hợp lệ ---
+  if (!req.body || typeof req.body !== 'object') {
+    res.status(400).json({ message: 'Request body is required.' });
+    return;
+  }
+
+  const {
+    category,
+    linkContent,
+    textContent,
+    expiration,
+    password,
     latitude,
-    longitude 
-  } = req.body;
+    longitude,
+  } = req.body as Record<string, unknown>;
 
   const file = req.file;
 
-  // ✅ Validate vị trí bắt buộc
-  if (!latitude || !longitude) {
-    res.status(400).json({ message: 'Location is required to share files.' });
+  // --- Validate category (allow-list) ---
+  if (typeof category !== 'string' || !(VALID_CATEGORIES as readonly string[]).includes(category)) {
+    res.status(400).json({
+      message: `Invalid or missing category. Must be one of: ${VALID_CATEGORIES.join(', ')}.`,
+    });
     return;
+  }
+
+  // --- Validate vị trí bắt buộc (cho phép giá trị 0) ---
+  if (
+    latitude === undefined || latitude === null || latitude === '' ||
+    longitude === undefined || longitude === null || longitude === ''
+  ) {
+    res.status(400).json({ message: 'Location (latitude and longitude) is required to share files.' });
+    return;
+  }
+
+  const latNum = typeof latitude === 'number' ? latitude : parseFloat(String(latitude));
+  const longNum = typeof longitude === 'number' ? longitude : parseFloat(String(longitude));
+
+  if (!Number.isFinite(latNum) || !Number.isFinite(longNum)) {
+    res.status(400).json({ message: 'Invalid latitude or longitude. Must be numeric.' });
+    return;
+  }
+  if (latNum < -90 || latNum > 90 || longNum < -180 || longNum > 180) {
+    res.status(400).json({
+      message: 'Latitude must be between -90 and 90; longitude must be between -180 and 180.',
+    });
+    return;
+  }
+
+  // --- Validate expiration (tùy chọn) ---
+  let expirationOption: string | null = null;
+  if (expiration !== undefined && expiration !== null && expiration !== '') {
+    if (typeof expiration !== 'string' || !(VALID_EXPIRATIONS as readonly string[]).includes(expiration)) {
+      res.status(400).json({
+        message: `Invalid expiration. Must be one of: ${VALID_EXPIRATIONS.join(', ')}.`,
+      });
+      return;
+    }
+    expirationOption = expiration;
+  }
+
+  // --- Validate password (tùy chọn) ---
+  let trimmedPassword: string | null = null;
+  if (password !== undefined && password !== null && password !== '') {
+    if (typeof password !== 'string') {
+      res.status(400).json({ message: 'Password must be a string.' });
+      return;
+    }
+    const pw = password.trim();
+    if (pw.length > 0) {
+      if (pw.length < MIN_PASSWORD_LENGTH || pw.length > MAX_PASSWORD_LENGTH) {
+        res.status(400).json({
+          message: `Password must be between ${MIN_PASSWORD_LENGTH} and ${MAX_PASSWORD_LENGTH} characters.`,
+        });
+        return;
+      }
+      trimmedPassword = pw;
+    }
   }
 
   try {
     let fileUrl = '';
     let fileName = '';
-    let fileType = category;
     let fileSize = 0;
 
     // --- XỬ LÝ NỘI DUNG THEO LOẠI ---
     if (category === 'Photos' || category === 'Videos' || category === 'Files') {
       if (!file) {
-        res.status(400).json({ message: 'No file uploaded' });
+        res.status(400).json({ message: 'No file uploaded.' });
+        return;
+      }
+      if (!file.size || file.size <= 0) {
+        res.status(400).json({ message: 'Uploaded file is empty.' });
         return;
       }
 
@@ -193,62 +273,60 @@ export const shareDocumentPublic = async (req: any, res: Response): Promise<void
         .from('documents')
         .upload(filePath, file.buffer, {
           contentType: file.mimetype,
-          upsert: false
+          upsert: false,
         });
 
       if (uploadError) throw uploadError;
       fileUrl = filePath;
-    } 
-    else if (category === 'Links') {
-      if (!linkContent?.trim()) {
-        res.status(400).json({ message: 'Link content is required' });
+    } else if (category === 'Links') {
+      if (typeof linkContent !== 'string' || !linkContent.trim()) {
+        res.status(400).json({ message: 'Link content is required.' });
         return;
       }
-      fileUrl = linkContent.trim();
-      fileName = linkContent.trim();
-    } 
-    else if (category === 'Text') {
-      if (!textContent?.trim()) {
-        res.status(400).json({ message: 'Text content is required' });
+      const link = linkContent.trim();
+      if (!isValidHttpUrl(link)) {
+        res.status(400).json({ message: 'Link must be a valid http(s) URL.' });
+        return;
+      }
+      fileUrl = link;
+      fileName = link;
+    } else if (category === 'Text') {
+      if (typeof textContent !== 'string' || !textContent.trim()) {
+        res.status(400).json({ message: 'Text content is required.' });
+        return;
+      }
+      const text = textContent.trim();
+      if (text.length > MAX_TEXT_LENGTH) {
+        res.status(413).json({
+          message: `Text content exceeds maximum length of ${MAX_TEXT_LENGTH} characters.`,
+        });
         return;
       }
       fileName = `note-${Date.now()}.txt`;
-      const buffer = Buffer.from(textContent.trim(), 'utf-8');
+      const buffer = Buffer.from(text, 'utf-8');
+      fileSize = buffer.length;
       const filePath = `public/${fileName}`;
-      
-      const { error } = await supabase.storage.from('documents').upload(filePath, buffer, { contentType: 'text/plain' });
+
+      const { error } = await supabase.storage
+        .from('documents')
+        .upload(filePath, buffer, { contentType: 'text/plain' });
       if (error) throw error;
       fileUrl = filePath;
     }
-    else {
-      res.status(400).json({ message: 'Invalid category' });
-      return;
-    }
 
     // --- XỬ LÝ MẬT KHẨU ---
-    let passwordHash = null;
+    let passwordHash: string | null = null;
     let isProtected = false;
-    if (password && password.trim() !== '') {
+    if (trimmedPassword) {
       const salt = await bcrypt.genSalt(10);
-      passwordHash = await bcrypt.hash(password.trim(), salt);
+      passwordHash = await bcrypt.hash(trimmedPassword, salt);
       isProtected = true;
     }
 
     // --- TÍNH THỜI GIAN HẾT HẠN ---
-    const expiresAt = calculateExpiration(expiration);
-
-    // --- CHUẨN HÓA GIÁ TRỊ BOOLEAN ---
-    const isAnonymousBool = isAnonymous === 'true' || isAnonymous === true;
+    const expiresAt = expirationOption ? calculateExpiration(expirationOption) : null;
 
     // --- CHUYỂN ĐỔI TỌA ĐỘ THÀNH POSTGIS POINT ---
-    const latNum = parseFloat(latitude as string);
-    const longNum = parseFloat(longitude as string);
-    
-    if (isNaN(latNum) || isNaN(longNum)) {
-      res.status(400).json({ message: 'Invalid latitude or longitude' });
-      return;
-    }
-
     const locationPoint = `POINT(${longNum} ${latNum})`; // PostGIS: POINT(long lat)
 
     // --- LƯU VÀO DATABASE ---
@@ -265,21 +343,22 @@ export const shareDocumentPublic = async (req: any, res: Response): Promise<void
         is_anonymous: true, // Always anonymous for public sharing
         expires_at: expiresAt,
         status: 'active',
-        location: locationPoint
+        location: locationPoint,
       }])
       .select()
       .single();
 
     if (dbError) throw dbError;
 
-    res.status(201).json({ 
-      message: 'Shared successfully', 
-      document: newDoc 
+    res.status(201).json({
+      message: 'Shared successfully',
+      document: newDoc,
     });
-
-  } catch (error: any) {
-    console.error('Public Share Error:', error.message);
-    res.status(500).json({ message: 'Upload failed', error: error.message });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('Public Share Error:', message);
+    // Không leak chi tiết lỗi nội bộ ra client
+    res.status(500).json({ message: 'Failed to share document. Please try again later.' });
   }
 };
 
