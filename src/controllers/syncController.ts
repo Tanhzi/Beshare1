@@ -29,7 +29,7 @@ const getFileTypeFromExtension = (fileName: string): string => {
 // --- 1. GỬI LỜI MỜI LIÊN KẾT ---
 export const linkAccount = async (req: AuthRequest, res: Response): Promise<void> => {
   const { email } = req.body;
-  const myId = req.user.id;
+  const myId = req.user!.id;
 
   try {
     // Tìm người dùng theo email
@@ -88,7 +88,7 @@ export const linkAccount = async (req: AuthRequest, res: Response): Promise<void
 
 // --- 2. LẤY DANH SÁCH YÊU CẦU (INCOMING / OUTGOING) ---
 export const getPendingRequests = async (req: AuthRequest, res: Response): Promise<void> => {
-  const myId = req.user.id;
+  const myId = req.user!.id;
 
   try {
     // Lời mời gửi ĐẾN mình (Mình là receiver)
@@ -123,7 +123,7 @@ export const getPendingRequests = async (req: AuthRequest, res: Response): Promi
 
 // --- 3. PHẢN HỒI YÊU CẦU (ACCEPT / REJECT) ---
 export const respondToRequest = async (req: AuthRequest, res: Response): Promise<void> => {
-  const myId = req.user.id;
+  const myId = req.user!.id;
   const { connectionId, action } = req.body; // action: 'accept' | 'reject'
 
   try {
@@ -167,7 +167,7 @@ export const respondToRequest = async (req: AuthRequest, res: Response): Promise
 
 // --- 4. LẤY TRẠNG THÁI LIÊN KẾT (STATUS) ---
 export const getSyncStatus = async (req: AuthRequest, res: Response): Promise<void> => {
-  const myId = req.user.id;
+  const myId = req.user!.id;
 
   try {
     const { data: connection, error } = await supabase
@@ -210,7 +210,7 @@ export const getSyncStatus = async (req: AuthRequest, res: Response): Promise<vo
 
 // --- 5. UNLINK ---
 export const unlinkAccount = async (req: AuthRequest, res: Response): Promise<void> => {
-  const myId = req.user.id;
+  const myId = req.user!.id;
   try {
     const { error } = await supabase
       .from('connections')
@@ -228,7 +228,7 @@ export const unlinkAccount = async (req: AuthRequest, res: Response): Promise<vo
 
 // --- 6. UPDATE SETTINGS ---
 export const updateSettings = async (req: AuthRequest, res: Response): Promise<void> => {
-  const myId = req.user.id;
+  const myId = req.user!.id;
   const { autoDownload, autoView } = req.body;
 
   try {
@@ -251,7 +251,7 @@ export const updateSettings = async (req: AuthRequest, res: Response): Promise<v
 
 // --- 7. HỦY LỜI MỜI (Dành cho người gửi muốn rút lại) ---
 export const cancelRequest = async (req: AuthRequest, res: Response): Promise<void> => {
-  const myId = req.user.id;
+  const myId = req.user!.id;
   const { connectionId } = req.body;
 
   try {
@@ -273,7 +273,7 @@ export const cancelRequest = async (req: AuthRequest, res: Response): Promise<vo
 
 // --- 8. LẤY TÀI LIỆU MỚI NHẤT CỦA PARTNER (INSTANT PREVIEW) ---
 export const getPartnerDocuments = async (req: AuthRequest, res: Response): Promise<void> => {
-  const myId = req.user.id;
+  const myId = req.user!.id;
 
   try {
     // 1. Lấy thông tin kết nối hiện tại

@@ -4,7 +4,7 @@ import supabase from '../config/db';
 
 export const uploadAvatar = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const userId = req.user.id;
+    const userId = req.user!.id;
     const file = req.file; // File do Multer xử lý
 
     if (!file) {
@@ -46,6 +46,6 @@ export const uploadAvatar = async (req: AuthRequest, res: Response): Promise<voi
 
   } catch (error: any) {
     console.error('Upload Error:', error.message);
-    res.status(500).json({ message: 'Upload failed', error: error.message });
+    res.status(500).json({ message: 'Upload failed' });
   }
 };

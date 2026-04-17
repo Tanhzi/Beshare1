@@ -18,7 +18,7 @@ const calculateExpiration = (option: string): string | null => {
 
 // --- 1. HÀM CHIA SẺ TÀI LIỆU (CÓ VỊ TRÍ) ---
 export const shareDocument = async (req: AuthRequest, res: Response): Promise<void> => {
-  const userId = req.user.id;
+  const userId = req.user!.id;
   const { 
     category, 
     linkContent, 
@@ -146,7 +146,7 @@ export const shareDocument = async (req: AuthRequest, res: Response): Promise<vo
 
   } catch (error: any) {
     console.error('Share Error:', error.message);
-    res.status(500).json({ message: 'Upload failed', error: error.message });
+    res.status(500).json({ message: 'Upload failed' });
   }
 };
 
@@ -279,7 +279,7 @@ export const shareDocumentPublic = async (req: any, res: Response): Promise<void
 
   } catch (error: any) {
     console.error('Public Share Error:', error.message);
-    res.status(500).json({ message: 'Upload failed', error: error.message });
+    res.status(500).json({ message: 'Upload failed' });
   }
 };
 
@@ -320,13 +320,18 @@ export const scanNearbyDocuments = async (req: AuthRequest, res: Response): Prom
 
   } catch (error: any) {
     console.error('Scan Error:', error.message);
-    res.status(500).json({ message: 'Scan failed', error: error.message });
+    res.status(500).json({ message: 'Scan failed' });
   }
 };
 
 // --- 3. XÁC THỰC MẬT KHẨU & LẤY LINK TẢI ---
 export const verifyDocumentPassword = async (req: AuthRequest, res: Response): Promise<void> => {
   const { documentId, password } = req.body;
+
+  if (typeof documentId !== 'string' || documentId.length === 0) {
+    res.status(400).json({ message: 'Invalid document id' });
+    return;
+  }
 
   try {
     // 1. Lấy thông tin file từ Database
@@ -341,10 +346,16 @@ export const verifyDocumentPassword = async (req: AuthRequest, res: Response): P
       return;
     }
 
-    // 2. Kiểm tra mật khẩu (Giữ nguyên logic cũ)
+    // 2. Kiểm tra mật khẩu: yêu cầu password cho MỌI file. Trước đây nếu
+    // is_protected=false, endpoint bỏ qua check và cấp signed URL cho bất kỳ
+    // ai gọi tới, biến verify-password-public thành download oracle cho mọi file.
     if (doc.is_protected) {
-      if (!password) {
+      if (typeof password !== 'string' || password.length === 0) {
         res.status(400).json({ message: 'Password is required' });
+        return;
+      }
+      if (!doc.password_hash) {
+        res.status(500).json({ message: 'Document is misconfigured' });
         return;
       }
       const isMatch = await bcrypt.compare(password, doc.password_hash);
@@ -388,7 +399,7 @@ export const verifyDocumentPassword = async (req: AuthRequest, res: Response): P
 // --- API MỚI: LẤY LINK TẢI HOẶC NỘI DUNG AN TOÀN ---
 export const getDocumentDownload = async (req: AuthRequest, res: Response): Promise<void> => {
   const { id } = req.params;
-  const userId = req.user.id; // Lấy ID người đang gọi API
+  const userId = req.user?.id; // Có thể undefined cho endpoint public
 
   try {
     // 1. Lấy thông tin file từ DB
@@ -403,9 +414,18 @@ export const getDocumentDownload = async (req: AuthRequest, res: Response): Prom
       return;
     }
 
-    // 2. Bảo mật: Kiểm tra quyền xem (Logic tùy bạn: ví dụ phải là owner hoặc được share)
-    // Ở đây giả sử nếu đã có record trong bảng documents thì được xem (vì Sync logic đã filter)
-    
+    // 2. Bảo mật: Tôn trọng password protection.
+    // Trước đây endpoint này cấp link tải mà không check mật khẩu, cho phép
+    // bất kỳ ai biết `id` (kể cả qua /download-public) bypass toàn bộ bảo vệ
+    // bằng mật khẩu. Client cần gọi /verify-password(-public) trước để lấy
+    // link tải cho file is_protected.
+    if (doc.is_protected) {
+      res.status(401).json({
+        message: 'Password required. Use /verify-password to obtain a download link.',
+      });
+      return;
+    }
+
     // 3. Xử lý theo loại file
     
     // TRƯỜNG HỢP A: Là Text -> Backend đọc file và trả về nội dung luôn

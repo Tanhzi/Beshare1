@@ -4,7 +4,7 @@ import { AuthRequest } from '../middleware/authMiddleware';
 
 export const updateProfile = async (req: AuthRequest, res: Response): Promise<void> => {
   const { full_name, avatar_url } = req.body;
-  const userId = req.user.id;
+  const userId = req.user!.id;
 
   try {
     const { data: updatedUser, error } = await supabase

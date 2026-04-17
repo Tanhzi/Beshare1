@@ -1,13 +1,41 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import supabase from '../config/db'; // Import client mới
 import { AuthRequest } from '../middleware/authMiddleware';
 import { sendResetPasswordEmail } from '../services/emailService';
 
+// Basic server-side email + password validation. Matches what the mobile app
+// enforces and protects the API if someone hits it directly.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MIN_PASSWORD_LEN = 8;
+const MAX_PASSWORD_LEN = 128;
+
+const isValidEmail = (v: unknown): v is string =>
+  typeof v === 'string' && v.length <= 254 && EMAIL_RE.test(v);
+
+const isValidPassword = (v: unknown): v is string =>
+  typeof v === 'string' && v.length >= MIN_PASSWORD_LEN && v.length <= MAX_PASSWORD_LEN;
+
 // --- ĐĂNG KÝ ---
 export const register = async (req: Request, res: Response): Promise<void> => {
   const { full_name, email, password } = req.body;
+
+  if (!isValidEmail(email)) {
+    res.status(400).json({ message: 'Invalid email address' });
+    return;
+  }
+  if (!isValidPassword(password)) {
+    res.status(400).json({
+      message: `Password must be ${MIN_PASSWORD_LEN}-${MAX_PASSWORD_LEN} characters`,
+    });
+    return;
+  }
+  if (typeof full_name !== 'string' || full_name.trim().length === 0 || full_name.length > 200) {
+    res.status(400).json({ message: 'Invalid full name' });
+    return;
+  }
 
   try {
     // 1. Kiểm tra email đã tồn tại chưa
@@ -53,7 +81,7 @@ export const register = async (req: Request, res: Response): Promise<void> => {
 
   } catch (error: any) {
     console.error('Register Error:', error.message);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    res.status(500).json({ message: 'Server error' });
   }
 };
 
@@ -95,14 +123,21 @@ export const login = async (req: Request, res: Response): Promise<void> => {
 
   } catch (error: any) {
     console.error('Login Error:', error.message);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    res.status(500).json({ message: 'Server error' });
   }
 };
 
 // --- ĐỔI MẬT KHẨU ---
 export const changePassword = async (req: AuthRequest, res: Response): Promise<void> => {
   const { oldPassword, newPassword } = req.body;
-  const userId = req.user.id; // Lấy ID từ token đã giải mã
+  const userId = req.user!.id; // Lấy ID từ token đã giải mã
+
+  if (typeof oldPassword !== 'string' || !isValidPassword(newPassword)) {
+    res.status(400).json({
+      message: `Password must be ${MIN_PASSWORD_LEN}-${MAX_PASSWORD_LEN} characters`,
+    });
+    return;
+  }
 
   try {
     // 1. Lấy thông tin user hiện tại từ DB
@@ -140,7 +175,7 @@ export const changePassword = async (req: AuthRequest, res: Response): Promise<v
 
   } catch (error: any) {
     console.error('Change Password Error:', error.message);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    res.status(500).json({ message: 'Server error' });
   }
 };
 
@@ -162,8 +197,9 @@ export const forgotPassword = async (req: Request, res: Response): Promise<void>
       return;
     }
 
-    // 2. Tạo mã OTP (6 số ngẫu nhiên) giống PHP: rand(100000, 999999)
-    const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
+    // 2. Tạo mã OTP (6 số ngẫu nhiên) – dùng crypto-secure RNG.
+    // Math.random() là predictable và không chấp nhận được cho credentials.
+    const resetCode = crypto.randomInt(100000, 1000000).toString();
     
     // 3. Thời gian hết hạn (10 phút)
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();

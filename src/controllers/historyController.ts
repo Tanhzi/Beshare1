@@ -4,7 +4,7 @@ import supabase from '../config/db';
 
 // --- LẤY LỊCH SỬ GIAO DỊCH (GỬI & NHẬN) ---
 export const getHistory = async (req: AuthRequest, res: Response): Promise<void> => {
-  const userId = req.user.id;
+  const userId = req.user!.id;
 
   try {
     // 1. Lấy danh sách file TÔI GỬI (Sent)

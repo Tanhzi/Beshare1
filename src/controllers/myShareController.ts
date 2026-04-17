@@ -5,7 +5,7 @@ import bcrypt from 'bcryptjs';
 
 // --- 1. LẤY DANH SÁCH TÀI LIỆU CỦA TÔI ---
 export const getMyDocuments = async (req: AuthRequest, res: Response): Promise<void> => {
-  const userId = req.user.id;
+  const userId = req.user!.id;
   try {
     const { data: docs, error } = await supabase
       .from('documents')
@@ -26,7 +26,7 @@ export const getMyDocuments = async (req: AuthRequest, res: Response): Promise<v
 // --- 2. XÓA TÀI LIỆU ---
 export const deleteDocument = async (req: AuthRequest, res: Response): Promise<void> => {
   const { id } = req.params;
-  const userId = req.user.id;
+  const userId = req.user!.id;
 
   try {
     // Kiểm tra quyền sở hữu trước khi xóa
@@ -71,7 +71,7 @@ export const deleteDocument = async (req: AuthRequest, res: Response): Promise<v
 export const updatePasswordProtection = async (req: AuthRequest, res: Response): Promise<void> => {
   const { id } = req.params;
   const { password, isProtected } = req.body;
-  const userId = req.user.id;
+  const userId = req.user!.id;
 
   console.log("Update Password Request:", { id, password: password ? "***" : undefined, isProtected, userId });
 
@@ -132,7 +132,7 @@ export const updatePasswordProtection = async (req: AuthRequest, res: Response):
 
     if (error) {
       console.error("Supabase Update Error:", error);
-      res.status(500).json({ message: 'Database update failed', error: error.message });
+      res.status(500).json({ message: 'Database update failed' });
       return;
     }
 
