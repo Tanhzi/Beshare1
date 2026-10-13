@@ -1,3 +1,6 @@
 .env
 node_modules/
 *.log
+dist/
+*.tsbuildinfo
+set_gps_thanhhoa.bat

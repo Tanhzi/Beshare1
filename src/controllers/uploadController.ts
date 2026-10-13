@@ -1,8 +1,10 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/authMiddleware';
 import supabase from '../config/db';
+import { AVATAR_MIME_TO_EXT } from '../middleware/uploadValidation';
 
 export const uploadAvatar = async (req: AuthRequest, res: Response): Promise<void> => {
+  let uploadedFilePath: string | null = null;
   try {
     const userId = req.user.id;
     const file = req.file; // File do Multer xử lý
@@ -12,8 +14,8 @@ export const uploadAvatar = async (req: AuthRequest, res: Response): Promise<voi
       return;
     }
 
-    // 1. Upload lên Supabase Storage
-    const fileExt = file.originalname.split('.').pop();
+    // 1. Upload lên Supabase Storage (đổi extension theo mimetype, không tin originalname)
+    const fileExt = AVATAR_MIME_TO_EXT[file.mimetype?.toLowerCase()] || 'jpg';
     const filePath = `${userId}/${Date.now()}.${fileExt}`;
 
     const { error: uploadError } = await supabase.storage
@@ -24,6 +26,7 @@ export const uploadAvatar = async (req: AuthRequest, res: Response): Promise<voi
       });
 
     if (uploadError) throw uploadError;
+    uploadedFilePath = filePath;
 
     // 2. Lấy Public URL
     const { data: { publicUrl } } = supabase.storage
@@ -46,6 +49,15 @@ export const uploadAvatar = async (req: AuthRequest, res: Response): Promise<voi
 
   } catch (error: any) {
     console.error('Upload Error:', error.message);
-    res.status(500).json({ message: 'Upload failed', error: error.message });
+
+    // Dọn file mồ côi nếu lỗi sau khi đã upload
+    if (uploadedFilePath) {
+      const { error: cleanupError } = await supabase.storage
+        .from('avatars')
+        .remove([uploadedFilePath]);
+      if (cleanupError) console.error('Avatar cleanup failed:', cleanupError.message);
+    }
+
+    res.status(500).json({ message: 'Upload failed' });
   }
 };

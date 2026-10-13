@@ -14,7 +14,7 @@ export const sendResetPasswordEmail = async (toEmail: string, resetCode: string)
 
   const data = {
     sender: {
-      name: process.env.SENDER_NAME || 'AI Study Buddy',
+      name: process.env.SENDER_NAME || 'ShareDocu',
       email: process.env.SENDER_EMAIL, // Email này PHẢI được verify trong Brevo
     },
     to: [
@@ -22,7 +22,7 @@ export const sendResetPasswordEmail = async (toEmail: string, resetCode: string)
         email: toEmail,
       },
     ],
-    subject: "Mã đặt lại mật khẩu - AI Study Buddy",
+    subject: "Mã đặt lại mật khẩu - ShareDocu",
     htmlContent: `
       <html>
         <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">

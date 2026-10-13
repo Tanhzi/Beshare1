@@ -7,9 +7,12 @@ import bcrypt from 'bcryptjs';
 export const getMyDocuments = async (req: AuthRequest, res: Response): Promise<void> => {
   const userId = req.user.id;
   try {
+    // Whitelist cột — KHÔNG dùng select('*') để không leak password_hash (B12)
     const { data: docs, error } = await supabase
       .from('documents')
-      .select('*')
+      .select(
+        'id, owner_id, name, file_url, file_type, file_size, is_protected, is_anonymous, expires_at, status, created_at'
+      )
       .eq('owner_id', userId)
       .or('expires_at.is.null,expires_at.gt.now()') // Lấy cả file không có hạn và file chưa hết hạn
       .eq('status', 'active')
@@ -46,18 +49,30 @@ export const deleteDocument = async (req: AuthRequest, res: Response): Promise<v
       return;
     }
 
-    // Xóa file trong Storage (Nếu không phải Link)
-    if (!doc.file_url.startsWith('http')) {
-       await supabase.storage.from('documents').remove([doc.file_url]);
-    }
+    // Xoá transfer_history trỏ tới doc TRƯỚC để không vi phạm FK (B6)
+    const { error: historyError } = await supabase
+      .from('transfer_history')
+      .delete()
+      .eq('document_id', id);
 
-    // Xóa record trong Database
+    if (historyError) throw historyError;
+
+    // Xóa record trong Database TRƯỚC (B2 - nếu fail thì file vẫn còn để thử lại)
     const { error } = await supabase
       .from('documents')
       .delete()
       .eq('id', id);
 
     if (error) throw error;
+
+    // Xóa file trong Storage SAU khi DB đã xoá thành công (Nếu không phải Link/Text rỗng)
+    if (doc.file_url && !doc.file_url.startsWith('http')) {
+      const { error: storageError } = await supabase.storage
+        .from('documents')
+        .remove([doc.file_url]);
+      // File mồ côi không chặn response — chỉ log để dọn sau
+      if (storageError) console.error('Storage remove failed:', storageError.message);
+    }
 
     res.json({ message: 'Deleted successfully' });
 
@@ -83,24 +98,18 @@ export const updatePasswordProtection = async (req: AuthRequest, res: Response):
       .eq('id', id)
       .single();
 
-    console.log("Document lookup result:", { doc, fetchError });
-
     if (fetchError) {
       console.error("Database fetch error:", fetchError);
-      res.status(500).json({ message: 'Database error', error: fetchError.message });
+      res.status(500).json({ message: 'Database error' });
       return;
     }
 
     if (!doc) {
-      console.log("Document not found for ID:", id);
       res.status(404).json({ message: 'Document not found' });
       return;
     }
 
-    console.log("Document found:", { docId: doc.id, ownerId: doc.owner_id, userId });
-
     if (doc.owner_id !== userId) {
-      console.log("Ownership check failed:", { docOwnerId: doc.owner_id, userId });
       res.status(403).json({ message: 'Not authorized to modify this file' });
       return;
     }
@@ -119,28 +128,22 @@ export const updatePasswordProtection = async (req: AuthRequest, res: Response):
       }
     }
 
-    // Cập nhật database
-    const { data: updatedDoc, error } = await supabase
+    // Cập nhật database — không .select() trả về để không leak password_hash (B12)
+    const { error } = await supabase
       .from('documents')
       .update({
         is_protected: isProtectedBool,
         password_hash: passwordHash
       })
-      .eq('id', id)
-      .select()
-      .single();
+      .eq('id', id);
 
     if (error) {
       console.error("Supabase Update Error:", error);
-      res.status(500).json({ message: 'Database update failed', error: error.message });
+      res.status(500).json({ message: 'Database update failed' });
       return;
     }
 
-    console.log("Update successful:", updatedDoc);
-    res.json({ 
-      message: 'Password protection updated successfully', 
-      document: updatedDoc 
-    });
+    res.json({ message: 'Password protection updated successfully' });
 
   } catch (error: any) {
     console.error("Update Password Error:", error.message);

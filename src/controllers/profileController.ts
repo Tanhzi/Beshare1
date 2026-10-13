@@ -1,15 +1,16 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import supabase from '../config/db';
 import { AuthRequest } from '../middleware/authMiddleware';
 
 export const updateProfile = async (req: AuthRequest, res: Response): Promise<void> => {
-  const { full_name, avatar_url } = req.body;
+  // Chỉ nhận full_name — avatar_url bắt buộc đổi qua POST /upload-avatar (Thấp 13)
+  const { full_name } = req.body;
   const userId = req.user.id;
 
   try {
     const { data: updatedUser, error } = await supabase
       .from('users')
-      .update({ full_name, avatar_url })
+      .update({ full_name })
       .eq('id', userId)
       .select('id, email, full_name, avatar_url')
       .single();
